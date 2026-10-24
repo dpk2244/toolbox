@@ -1,0 +1,4 @@
+-keep class com.tom_roush.** { *; }
+-keep class com.google.android.gms.ads.** { *; }
+-dontwarn org.bouncycastle.**
+-dontwarn org.spongycastle.**

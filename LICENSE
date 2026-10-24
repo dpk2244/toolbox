@@ -1,0 +1,15 @@
+Copyright (c) 2026 Pushpendra Singh — Pushpendra Tech (https://pushpendra.tech)
+
+All rights reserved.
+
+This source code is published on GitHub for transparency and review purposes
+only — so anyone can verify that the ToolBox app processes files locally on
+the device, exactly as its privacy policy states.
+
+No permission is granted to copy, modify, redistribute, or use this code, in
+whole or in part, to create derivative apps or competing products, without
+prior written permission from the copyright holder.
+
+Third-party libraries used by this project (PDFBox-Android, Media3, ML Kit,
+ZXing, AndroidX, Kotlin, Google Mobile Ads) are licensed under their own
+terms — see LICENSES.md.

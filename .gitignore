@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+/local.properties
+/build
+/app/build
+keystore.properties
+*.jks
+*.keystore
+.idea/
+captures/
+*.apk
+*.aab
+# Internal ops docs — never publish (real AdMob IDs / launch internals)
+ADMOB_IDS.md
+LAUNCH_RUNWAY.md
+# Design explorations (bulk) — final icon lives in play-assets/ + app res
+icon-concepts/
