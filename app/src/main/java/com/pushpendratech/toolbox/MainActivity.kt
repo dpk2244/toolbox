@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +45,9 @@ import com.pushpendratech.toolbox.ads.BannerAd
 import com.pushpendratech.toolbox.core.CrashLog
 import com.pushpendratech.toolbox.data.Category
 import com.pushpendratech.toolbox.data.Prefs
+import com.pushpendratech.toolbox.data.THEME_DARK
+import com.pushpendratech.toolbox.data.THEME_LIGHT
+import com.pushpendratech.toolbox.data.THEME_SYSTEM
 import com.pushpendratech.toolbox.data.Tool
 import com.pushpendratech.toolbox.data.Tools
 import com.pushpendratech.toolbox.ui.*
@@ -53,7 +57,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestAdsConsent()
-        setContent { ToolBoxTheme { CrashReportGate { ToolBoxRoot(Prefs(applicationContext)) } } }
+        val prefs = Prefs(applicationContext)
+        setContent {
+            val themeMode by prefs.themeMode.collectAsState(initial = THEME_SYSTEM)
+            val dark = when (themeMode) {
+                THEME_LIGHT -> false
+                THEME_DARK -> true
+                else -> isSystemInDarkTheme()
+            }
+            ToolBoxTheme(dark = dark) { CrashReportGate { ToolBoxRoot(prefs) } }
+        }
     }
     /** UMP consent (required for EEA/UK users; no-ops where not required). Ads still load per Google's rules if consent is declined for personalised ads. */
     private fun requestAdsConsent() {
@@ -112,6 +125,7 @@ fun ToolBoxRoot(prefs: Prefs) {
     val nav = rememberNavController()
     val favorites by prefs.favorites.collectAsState(initial = emptySet())
     val recents by prefs.recents.collectAsState(initial = emptyList())
+    val showRecents by prefs.showRecents.collectAsState(initial = true)
     val scope = rememberCoroutineScope()
     val openTool: (Tool) -> Unit = { tool -> scope.launch { prefs.pushRecent(tool.id) }; nav.navigate("tool/${tool.id}") }
     val backStack by nav.currentBackStackEntryAsState()
@@ -155,7 +169,7 @@ fun ToolBoxRoot(prefs: Prefs) {
     ) { padding ->
         NavHost(navController = nav, startDestination = "home", modifier = Modifier.padding(padding)) {
             composable("home") {
-                HomeScreen(favorites = favorites, recents = recents, onTool = openTool)
+                HomeScreen(favorites = favorites, recents = recents, showRecents = showRecents, onTool = openTool)
             }
             composable("alltools") {
                 AllToolsScreen(onTool = openTool)
@@ -163,7 +177,8 @@ fun ToolBoxRoot(prefs: Prefs) {
             composable("favorites_tab") {
                 FavoritesScreen(favorites.mapNotNull { id -> Tools.all.find { it.id == id } }, onTool = openTool, onBack = null)
             }
-            composable("settings_tab") { SettingsScreen(onBack = null) }
+            composable("settings_tab") { SettingsScreen(prefs = prefs, onOpenAbout = { nav.navigate("about") }, onBack = null) }
+            composable("about") { AboutScreen(onBack = { nav.popBackStack() }) }
             composable("category/{cat}", arguments = listOf(navArgument("cat") { type = NavType.StringType })) { entry ->
                 val cat = Category.valueOf(entry.arguments!!.getString("cat")!!)
                 CategoryScreen(cat, onTool = openTool, onBack = { nav.popBackStack() })
@@ -240,7 +255,7 @@ private val HOME_CATEGORY_ORDER = listOf(Category.PDF, Category.AI, Category.IMA
 private val FEATURED_IDS = listOf("pdf_compress_kb", "img_exact_kb", "ai_bg_remover", "pdf_merge")
 
 @Composable
-fun HomeScreen(favorites: Set<String>, recents: List<String>, onTool: (Tool) -> Unit) {
+fun HomeScreen(favorites: Set<String>, recents: List<String>, showRecents: Boolean = true, onTool: (Tool) -> Unit) {
     var query by remember { mutableStateOf("") }
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -268,7 +283,7 @@ fun HomeScreen(favorites: Set<String>, recents: List<String>, onTool: (Tool) -> 
                 item { Text("⭐ Favorites", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                 items(favTools) { ToolRow(it) { onTool(it) } }
             }
-            val recentTools = recents.mapNotNull { id -> Tools.all.find { it.id == id } }
+            val recentTools = if (showRecents) recents.mapNotNull { id -> Tools.all.find { it.id == id } } else emptyList()
             if (recentTools.isNotEmpty()) {
                 item { Text("🕘 Recently Used", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                 items(recentTools) { ToolRow(it) { onTool(it) } }
@@ -359,11 +374,75 @@ fun FavoritesScreen(favTools: List<Tool>, onTool: (Tool) -> Unit, onBack: (() ->
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: (() -> Unit)?) {
+fun SettingsScreen(prefs: Prefs, onOpenAbout: () -> Unit, onBack: (() -> Unit)?) {
+    val themeMode by prefs.themeMode.collectAsState(initial = THEME_SYSTEM)
+    val showRecents by prefs.showRecents.collectAsState(initial = true)
+    val recents by prefs.recents.collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
+    var clearedNote by remember { mutableStateOf(false) }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("Settings") },
             navigationIcon = { if (onBack != null) TextButton(onClick = onBack) { Text("← Back") } }
+        )
+    }) { padding ->
+        LazyColumn(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item { Text("ToolBox", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Version ${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})") }
+            item { Text("Appearance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+            item { Text("Theme", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold) }
+            items(listOf(THEME_SYSTEM to "System default", THEME_LIGHT to "Light", THEME_DARK to "Dark")) { (mode, label) ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { scope.launch { prefs.setThemeMode(mode) } },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = themeMode == mode, onClick = { scope.launch { prefs.setThemeMode(mode) } })
+                    Text(label)
+                }
+            }
+            item { Text("Home", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+            item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Show Recently Used", fontWeight = FontWeight.SemiBold)
+                        Text("Recently opened tools on the Home tab", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = showRecents, onCheckedChange = { scope.launch { prefs.setShowRecents(it) } })
+                }
+            }
+            item {
+                OutlinedButton(
+                    onClick = { scope.launch { prefs.clearRecents(); clearedNote = true } },
+                    enabled = recents.isNotEmpty()
+                ) { Text("Clear Recently Used (${recents.size})") }
+                if (clearedNote && recents.isEmpty()) {
+                    Text("Recently Used cleared ✓", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            item { HorizontalDivider() }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onOpenAbout() }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("About", fontWeight = FontWeight.SemiBold)
+                        Text("Version, privacy & app info", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            item { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AboutScreen(onBack: () -> Unit) {
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text("About") },
+            navigationIcon = { TextButton(onClick = onBack) { Text("← Back") } }
         )
     }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
