@@ -3,6 +3,7 @@ package com.pushpendratech.toolbox
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -22,9 +23,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -58,14 +62,34 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         requestAdsConsent()
         val prefs = Prefs(applicationContext)
-        setContent {
-            val themeMode by prefs.themeMode.collectAsState(initial = THEME_SYSTEM)
-            val dark = when (themeMode) {
-                THEME_LIGHT -> false
-                THEME_DARK -> true
-                else -> isSystemInDarkTheme()
+        val startContent: () -> Unit = {
+            setContent {
+                val themeMode by prefs.themeMode.collectAsState(initial = THEME_SYSTEM)
+                val dark = when (themeMode) {
+                    THEME_LIGHT -> false
+                    THEME_DARK -> true
+                    else -> isSystemInDarkTheme()
+                }
+                ToolBoxTheme(dark = dark) { CrashReportGate { ToolBoxRoot(prefs) } }
             }
-            ToolBoxTheme(dark = dark) { CrashReportGate { ToolBoxRoot(prefs) } }
+        }
+        // v1.3.6: on some devices (his Fold6 + Moto Pad) the framework intermittently fails
+        // while setContent builds the window decor during the first launches after an
+        // install/update — "Window couldn't find content container view" (PhoneWindow.
+        // generateLayout) or an NPE at ComponentActivity.setContent — BEFORE any app code
+        // runs. So: don't touch the decor inside onCreate at all. Start the content from
+        // the main queue (activity fully created by then) and retry once after a short
+        // delay if the window still isn't ready. A bad first pass can no longer kill a launch.
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        mainHandler.post {
+            if (isFinishing || isDestroyed) return@post
+            try {
+                startContent()
+            } catch (t: Throwable) {
+                mainHandler.postDelayed({
+                    if (!isFinishing && !isDestroyed) startContent()
+                }, 300)
+            }
         }
     }
     /** UMP consent (required for EEA/UK users; no-ops where not required). Ads still load per Google's rules if consent is declined for personalised ads. */
@@ -81,6 +105,10 @@ class MainActivity : ComponentActivity() {
 /** If the previous run crashed, show the captured stack trace once, with Copy — so the exact error can be shared for a precise fix instead of guesswork. */
 @Composable
 private fun CrashReportGate(content: @Composable () -> Unit) {
+    // Pushpendra's decision (25 Oct 2026): the crash-report box is a TEST-build tool only —
+    // it exists so a device crash can be diagnosed from the exact stack. Release (Play)
+    // builds never show it; Play Console vitals are the crash channel there.
+    if (!BuildConfig.SHOW_CRASH_REPORT) { content(); return }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var crash by remember { mutableStateOf(CrashLog.read(context)) }
@@ -225,6 +253,12 @@ private fun categoryAccent(cat: Category): Color = when (cat) {
     Category.CALC -> Color(0xFF43A047)
 }
 
+/** Short label for the v1.3 home category chips. */
+private fun chipLabel(cat: Category): String = when (cat) {
+    Category.CALC -> "Calc"
+    else -> cat.title.removeSuffix(" Tools")
+}
+
 /** One home tile: category-coloured rounded card, big category emoji, tool name under it. */
 @Composable
 private fun ToolTile(tool: Tool, modifier: Modifier = Modifier, onClick: () -> Unit) {
@@ -254,18 +288,49 @@ private val HOME_CATEGORY_ORDER = listOf(Category.PDF, Category.AI, Category.IMA
 /** Featured strip ids — resolved against the registry at render time; missing ids are skipped. */
 private val FEATURED_IDS = listOf("pdf_compress_kb", "img_exact_kb", "ai_bg_remover", "pdf_merge")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(favorites: Set<String>, recents: List<String>, showRecents: Boolean = true, onTool: (Tool) -> Unit) {
     var query by remember { mutableStateOf("") }
+    // v1.3: top category chips — null = All (full home), else a Category name.
+    // (v1.3.1: no Favorites chip — Pushpendra's call; Favorites keeps its bottom tab + home section.)
+    var chip by remember { mutableStateOf<String?>(null) }
+    // v1.3.5: header logo rendered by hand from the launcher drawable (bitmap), NOT via
+    // painterResource — v1.3.4 crashed at launch loading the adaptive icon through it.
+    // Any failure falls back to the emoji, so the header can never crash the app again.
+    val logoContext = LocalContext.current
+    val logoBitmap = remember {
+        runCatching {
+            val d = ContextCompat.getDrawable(logoContext, R.mipmap.ic_launcher) ?: return@runCatching null
+            val px = 192
+            val bmp = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bmp)
+            d.setBounds(0, 0, px, px)
+            d.draw(canvas)
+            bmp.asImageBitmap()
+        }.getOrNull()
+    }
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item { Spacer(Modifier.height(4.dp)) }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("🧰 ToolBox", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text("${Tools.all.size} Tools • 100% Offline", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            // v1.3.4: the real C2 logo beside the title (was the 🧰 emoji — renders differently on every phone).
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (logoBitmap != null) {
+                    Image(
+                        bitmap = logoBitmap,
+                        contentDescription = "ToolBox logo",
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp))
+                    )
+                } else {
+                    Text("🧰", style = MaterialTheme.typography.headlineMedium)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("ToolBox", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text("${Tools.all.size} Tools • 100% Offline", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                }
             }
         }
         item {
@@ -273,10 +338,49 @@ fun HomeScreen(favorites: Set<String>, recents: List<String>, showRecents: Boole
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search") },
                 modifier = Modifier.fillMaxWidth(), singleLine = true)
         }
+        if (query.isBlank()) {
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        FilterChip(
+                            selected = chip == null,
+                            onClick = { chip = null },
+                            label = { Text("All") }
+                        )
+                    }
+                    items(HOME_CATEGORY_ORDER) { cat ->
+                        FilterChip(
+                            selected = chip == cat.name,
+                            onClick = { chip = cat.name },
+                            label = { Text("${cat.emoji} ${chipLabel(cat)}") }
+                        )
+                    }
+                }
+            }
+        }
         if (query.isNotBlank()) {
             val results = Tools.search(query)
             if (results.isEmpty()) item { Text("No tools match \"$query\". Try \"pdf\", \"gst\", \"compress\"…") }
             items(results) { ToolRow(it) { onTool(it) } }
+        } else if (chip != null) {
+            val chipCat = Category.valueOf(chip!!)
+            val chipTools = Tools.byCategory(chipCat)
+            item {
+                Text(
+                    "${chipCat.emoji} ${chipCat.title} • ${chipTools.size}",
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold
+                )
+            }
+            if (chipTools.isEmpty()) {
+                item { Text("No tools in this category yet.") }
+            }
+            items(chipTools.chunked(3)) { rowTools ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (tool in rowTools) ToolTile(tool, Modifier.weight(1f)) { onTool(tool) }
+                    repeat(3 - rowTools.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            item { Spacer(Modifier.height(8.dp)) }
         } else {
             val favTools = favorites.mapNotNull { id -> Tools.all.find { it.id == id } }
             if (favTools.isNotEmpty()) {

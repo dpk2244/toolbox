@@ -15,17 +15,20 @@ android {
         applicationId = "com.pushpendratech.toolbox" // TODO: change to your own unique package id before Play upload
         minSdk = 26 // Android 8.0 — covers MediaCodec/PdfRenderer APIs used, ~95%+ of active devices in India
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.2.5"
+        versionCode = 16
+        versionName = "1.3.6"
         manifestPlaceholders["ADMOB_APP_ID"] = admobAppId
         buildConfigField("String", "ADMOB_BANNER_ID", "\"$admobBannerId\"")
         buildConfigField("String", "ADMOB_INTERSTITIAL_ID", "\"$admobInterstitialId\"")
+        // Crash-report dialog: ON for test builds (diagnosis), OFF for release — Pushpendra's decision, 25 Oct 2026.
+        buildConfigField("boolean", "SHOW_CRASH_REPORT", "true")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            buildConfigField("boolean", "SHOW_CRASH_REPORT", "false") // Play build: no crash box (Play vitals report instead)
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Signing is intentionally NOT hard-coded. Create keystore.properties (see README) for release signing.
         }
