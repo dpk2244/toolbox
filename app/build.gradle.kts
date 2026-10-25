@@ -15,8 +15,8 @@ android {
         applicationId = "com.pushpendratech.toolbox" // TODO: change to your own unique package id before Play upload
         minSdk = 26 // Android 8.0 — covers MediaCodec/PdfRenderer APIs used, ~95%+ of active devices in India
         targetSdk = 35
-        versionCode = 20
-        versionName = "1.4.3"
+        versionCode = 22
+        versionName = "1.4.5"
         manifestPlaceholders["ADMOB_APP_ID"] = admobAppId
         buildConfigField("String", "ADMOB_BANNER_ID", "\"$admobBannerId\"")
         buildConfigField("String", "ADMOB_INTERSTITIAL_ID", "\"$admobInterstitialId\"")

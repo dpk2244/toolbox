@@ -34,6 +34,19 @@ private fun NumField(label: String, value: String, onChange: (String) -> Unit) {
 }
 private fun fmt(v: Double): String = if (v == v.toLong().toDouble()) String.format("%,.0f", v) else String.format("%,.2f", v)
 
+/** Typing/pasting digits for the Age Calculator → progressive dd-MM-yyyy mask:
+ *  "0" → "0", "04" → "04", "040" → "04-0", "0402" → "04-02", "04021" → "04-02-1",
+ *  "04021994" → "04-02-1994". Non-digits are dropped; max 8 digits. */
+private fun formatDobInput(raw: String): String {
+    val digits = raw.filter { it.isDigit() }.take(8)
+    return buildString {
+        digits.forEachIndexed { i, c ->
+            if (i == 2 || i == 4) append('-')
+            append(c)
+        }
+    }
+}
+
 @Composable
 fun TextToolScreen(tool: Tool, isFav: Boolean, onToggleFav: () -> Unit, onBack: () -> Unit) {
     ToolScaffold(tool, isFav, onToggleFav, onBack) {
@@ -181,7 +194,14 @@ fun CalculatorScreen(tool: Tool, isFav: Boolean, onToggleFav: () -> Unit, onBack
             "calc_age" -> {
                 var dobText by remember { mutableStateOf("") }
                 var showPicker by remember { mutableStateOf(false) }
-                OutlinedTextField(dobText, { dobText = it }, label = { Text("Date of birth (dd-MM-yyyy)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                // v1.4.4 (Pushpendra's ask): dashes insert themselves while typing —
+                // type 04 → "04-", then 02 → "04-02-", then the year. Number pad too.
+                OutlinedTextField(
+                    dobText, { dobText = formatDobInput(it) },
+                    label = { Text("Date of birth (dd-MM-yyyy)") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                )
                 OutlinedButton(onClick = { showPicker = true }, modifier = Modifier.fillMaxWidth()) { Text("Pick date") }
                 if (showPicker) {
                     val picker = rememberDatePickerState()
@@ -193,7 +213,12 @@ fun CalculatorScreen(tool: Tool, isFav: Boolean, onToggleFav: () -> Unit, onBack
                     }) { DatePicker(picker) }
                 }
                 Button(onClick = { run {
-                    val dob = LocalDate.parse(dobText.trim(), DateTimeFormatter.ofPattern("dd-MM-yyyy"))
+                    // Friendly errors only — the raw java.time parse exception used to leak
+                    // onto this screen ("Text '04021994' could not be parsed at index 2").
+                    require(dobText.count { it.isDigit() } == 8) { "Enter the full date — it fills in as dd-MM-yyyy while you type (for example 04-02-1994)." }
+                    val dob = runCatching {
+                        LocalDate.parse(dobText.trim(), DateTimeFormatter.ofPattern("dd-MM-uuuu").withResolverStyle(java.time.format.ResolverStyle.STRICT))
+                    }.getOrElse { throw IllegalArgumentException("That isn't a real calendar date — check the day and month (dd-MM-yyyy).") }
                     val r = Calculators.age(dob)
                     "Age: ${r.years} years, ${r.months} months, ${r.days} days\nTotal days lived: ${r.totalDays} (${r.totalWeeks} weeks)\nYour date of birth stays on this device — it is never sent anywhere."
                 } }, modifier = Modifier.fillMaxWidth()) { Text("Calculate age") }
