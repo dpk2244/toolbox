@@ -2,6 +2,7 @@ package com.pushpendratech.toolbox
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,24 +75,32 @@ class MainActivity : ComponentActivity() {
                 ToolBoxTheme(dark = dark) { CrashReportGate { ToolBoxRoot(prefs) } }
             }
         }
-        // v1.3.6: on some devices (his Fold6 + Moto Pad) the framework intermittently fails
-        // while setContent builds the window decor during the first launches after an
-        // install/update — "Window couldn't find content container view" (PhoneWindow.
-        // generateLayout) or an NPE at ComponentActivity.setContent — BEFORE any app code
-        // runs. So: don't touch the decor inside onCreate at all. Start the content from
-        // the main queue (activity fully created by then) and retry once after a short
-        // delay if the window still isn't ready. A bad first pass can no longer kill a launch.
+        // Launch hardening (v1.3.6, fixed properly in v1.4.1): on some devices (his Fold6 +
+        // Moto Pad) the framework intermittently fails while setContent builds the window
+        // decor during the first launches after an install/update — "Window couldn't find
+        // content container view" (PhoneWindow.generateLayout) or an NPE at
+        // ComponentActivity.setContent — BEFORE any app code runs.
+        // v1.3.6's hole (proven by the 1.4.0 crash report he shared): the first attempt was
+        // wrapped in try/catch, but the single +300 ms RETRY called startContent() BARE —
+        // when the window was still not ready, that NPE escaped and killed the launch.
+        // v1.4.1: EVERY attempt is wrapped, up to 5 attempts over ~4 s, and a success flag
+        // stops the ladder. Nothing on this path can escape as an uncaught crash.
         val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        mainHandler.post {
-            if (isFinishing || isDestroyed) return@post
+        var contentStarted = false
+        fun tryStart(attempt: Int) {
+            if (contentStarted || isFinishing || isDestroyed) return
             try {
+                runCatching { window.decorView } // settle the decor inside the same safety net
                 startContent()
+                contentStarted = true
             } catch (t: Throwable) {
-                mainHandler.postDelayed({
-                    if (!isFinishing && !isDestroyed) startContent()
-                }, 300)
+                if (attempt < 4) {
+                    val delay = when (attempt) { 0 -> 300L; 1 -> 700L; 2 -> 1500L; else -> 1500L }
+                    mainHandler.postDelayed({ tryStart(attempt + 1) }, delay)
+                }
             }
         }
+        mainHandler.post { tryStart(0) }
     }
     /** UMP consent (required for EEA/UK users; no-ops where not required). Ads still load per Google's rules if consent is declined for personalised ads. */
     private fun requestAdsConsent() {
@@ -127,6 +137,14 @@ private fun CrashReportGate(content: @Composable () -> Unit) {
     }
     content()
 }
+
+/** Version line for Settings/About. Pushpendra's call (25 Oct 2026): public users should
+ *  see only "Version 1.4.1" — the internal versionCode is a developer detail. It stays
+ *  visible in TEST builds (SHOW_CRASH_REPORT flag = our test/release switch) because
+ *  crash reports quote it ("App version: 1.4.0 (17)") and it identifies the exact build. */
+private fun versionLabel(): String =
+    if (BuildConfig.SHOW_CRASH_REPORT) "Version ${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})"
+    else "Version ${BuildConfig.VERSION_NAME}"
 
 private val PDF_IDS = setOf("pdf_compress","pdf_merge","pdf_split","jpg_to_pdf","pdf_to_images","pdf_rotate","pdf_reorder","pdf_delete_pages","pdf_extract","pdf_watermark","pdf_page_numbers","pdf_protect","img_to_pdf")
 
@@ -218,6 +236,7 @@ fun ToolBoxRoot(prefs: Prefs) {
                 val back = { nav.popBackStack(); Unit }
                 when {
                     tool.id in MORE_TOOL_IDS -> MoreToolScreen(tool, isFav, toggle, back)
+                    tool.id in SENSOR_TOOL_IDS -> SensorToolScreen(tool, isFav, toggle, back)
                     tool.id in PDF2_IDS -> PdfToolScreen2(tool, isFav, toggle, back)
                     tool.id in PDF_IDS -> PdfToolScreen(tool, isFav, toggle, back)
                     tool.category == Category.IMAGE -> ImageToolScreen(tool, isFav, toggle, back)
@@ -251,6 +270,7 @@ private fun categoryAccent(cat: Category): Color = when (cat) {
     Category.AUDIO -> Color(0xFF00897B)
     Category.TEXT -> Color(0xFF5E35B1)
     Category.CALC -> Color(0xFF43A047)
+    Category.SENSORS -> Color(0xFF00ACC1)
 }
 
 /** Short label for the v1.3 home category chips. */
@@ -282,8 +302,11 @@ private fun ToolTile(tool: Tool, modifier: Modifier = Modifier, onClick: () -> U
     }
 }
 
-/** Home section order (contract: PDF, AI, IMAGE, VIDEO, AUDIO, TEXT, CALC). */
-private val HOME_CATEGORY_ORDER = listOf(Category.PDF, Category.AI, Category.IMAGE, Category.VIDEO, Category.AUDIO, Category.TEXT, Category.CALC)
+/** Home section order (contract: PDF, AI, IMAGE, VIDEO, AUDIO, TEXT, CALC, SENSORS).
+ *  v1.4.0 LESSON: this list drives the top chips AND the home sections AND the About
+ *  counts — a new Category added to the enum does NOT appear anywhere until it is
+ *  added HERE too (Sensors shipped invisible in 1.4.0; Pushpendra caught it). */
+private val HOME_CATEGORY_ORDER = listOf(Category.PDF, Category.AI, Category.IMAGE, Category.VIDEO, Category.AUDIO, Category.TEXT, Category.CALC, Category.SENSORS)
 
 /** Featured strip ids — resolved against the registry at render time; missing ids are skipped. */
 private val FEATURED_IDS = listOf("pdf_compress_kb", "img_exact_kb", "ai_bg_remover", "pdf_merge")
@@ -291,10 +314,14 @@ private val FEATURED_IDS = listOf("pdf_compress_kb", "img_exact_kb", "ai_bg_remo
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(favorites: Set<String>, recents: List<String>, showRecents: Boolean = true, onTool: (Tool) -> Unit) {
-    var query by remember { mutableStateOf("") }
+    // v1.4.2: query + chip live in rememberSaveable — with plain remember, returning from
+    // a tool reset Home to the All view (Pushpendra's report: "tool se back kiya to home
+    // khul jata hai, usi category me aana chahiye"). Saveable state survives on the nav
+    // back-stack entry, so Back from a tool lands on the SAME category view.
+    var query by rememberSaveable { mutableStateOf("") }
     // v1.3: top category chips — null = All (full home), else a Category name.
     // (v1.3.1: no Favorites chip — Pushpendra's call; Favorites keeps its bottom tab + home section.)
-    var chip by remember { mutableStateOf<String?>(null) }
+    var chip by rememberSaveable { mutableStateOf<String?>(null) }
     // v1.3.5: header logo rendered by hand from the launcher drawable (bitmap), NOT via
     // painterResource — v1.3.4 crashed at launch loading the adaptive icon through it.
     // Any failure falls back to the emoji, so the header can never crash the app again.
@@ -309,6 +336,28 @@ fun HomeScreen(favorites: Set<String>, recents: List<String>, showRecents: Boole
             d.draw(canvas)
             bmp.asImageBitmap()
         }.getOrNull()
+    }
+    // v1.4.2 Back ladder (Pushpendra's exact spec): from a category view, Back first
+    // returns to the full Home; only a Back pressed ON Home asks "Exit? Yes / No" —
+    // the app never closes without asking. (Tool screens sit on the nav stack above
+    // Home, so their Back already returns here, to the same category view.)
+    val activity = LocalContext.current as? android.app.Activity
+    var showExit by remember { mutableStateOf(false) }
+    BackHandler {
+        when {
+            query.isNotBlank() -> query = ""
+            chip != null -> chip = null
+            else -> showExit = true
+        }
+    }
+    if (showExit) {
+        AlertDialog(
+            onDismissRequest = { showExit = false },
+            title = { Text("Exit ToolBox?") },
+            text = { Text("Do you want to close the app?") },
+            confirmButton = { TextButton(onClick = { showExit = false; activity?.finish() }) { Text("Yes, exit") } },
+            dismissButton = { TextButton(onClick = { showExit = false }) { Text("No") } }
+        )
     }
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -491,7 +540,7 @@ fun SettingsScreen(prefs: Prefs, onOpenAbout: () -> Unit, onBack: (() -> Unit)?)
         )
     }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { Text("ToolBox", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Version ${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})") }
+            item { Text("ToolBox", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text(versionLabel()) }
             item { Text("Appearance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
             item { Text("Theme", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold) }
             items(listOf(THEME_SYSTEM to "System default", THEME_LIGHT to "Light", THEME_DARK to "Dark")) { (mode, label) ->
@@ -550,7 +599,7 @@ fun AboutScreen(onBack: () -> Unit) {
         )
     }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { Text("ToolBox", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Version ${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})") }
+            item { Text("ToolBox", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text(versionLabel()) }
             item { Text("Privacy", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
             item { Text("All file processing happens on your phone. Your PDFs, photos, videos and audio are never uploaded by this app — there is no server and no account. The only network use is Google AdMob ads, which may collect an advertising ID as described in the privacy policy. Favorites and recently-used tools are stored only on this device.") }
             item { Text("About", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }

@@ -7,6 +7,7 @@ enum class Category(val title: String, val emoji: String, val blurb: String) {
     AUDIO("Audio Tools", "🎵", "Trim, merge & convert audio"),
     TEXT("Text Tools", "✍️", "Count, clean & convert text"),
     CALC("Calculators", "🧮", "GST, EMI, age, units & more"),
+    SENSORS("Sensor Tools", "🧭", "Level, compass, sound, light & more"),
     AI("AI Tools", "🤖", "On-device AI — offline & private")
 }
 
@@ -132,9 +133,16 @@ object Tools {
         Tool("ai_labeler", Category.AI, "AI Photo Labeler", "What is in this photo? AI labels"),
         Tool("ai_barcode_scan", Category.AI, "AI QR & Barcode Scanner", "Scan codes from a photo"),
         Tool("ai_translator", Category.AI, "AI Offline Translator", "Translate text — offline after one-time pack", popular = true),
-        Tool("ai_voice_text", Category.AI, "AI Voice to Text", "Bolkar likho — speech to text")
+        Tool("ai_voice_text", Category.AI, "AI Voice to Text", "Bolkar likho — speech to text"),
+        // SENSORS — v1.4.0 (first sensor batch; Pushpendra's pick from the competitor study)
+        Tool("sensor_level", Category.SENSORS, "Spirit Level", "Bubble level with digital tilt angles", popular = true),
+        Tool("sensor_compass", Category.SENSORS, "Compass", "Magnetic compass with degree readout"),
+        Tool("sensor_sound", Category.SENSORS, "Sound Meter", "Measure ambient noise in decibels (estimate)"),
+        Tool("sensor_light", Category.SENSORS, "Light Meter", "Measure brightness in lux"),
+        Tool("sensor_metal", Category.SENSORS, "Metal Detector", "Find metal with the magnetic sensor"),
+        Tool("sensor_pressure", Category.SENSORS, "Barometer", "Air pressure & estimated altitude")
     )
-    init { require(all.size == 102) { "ToolBox must contain exactly 102 tools, found ${all.size}" } }
+    init { require(all.size == 108) { "ToolBox must contain exactly 108 tools, found ${all.size}" } }
     fun byId(id: String): Tool = all.first { it.id == id }
     fun byCategory(c: Category): List<Tool> = all.filter { it.category == c }
     fun search(q: String): List<Tool> {
