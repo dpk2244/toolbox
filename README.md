@@ -4,6 +4,16 @@ A native Android app (Kotlin + Jetpack Compose + Material 3) with **102 genuinel
 PDF 35 · AI 7 (on-device ML Kit) · Image 18 · Video 11 · Audio 9 · Text 12 · Calculators 10.
 No server, no account, no paid APIs. Files never leave the device (AdMob is the only network user).
 
+## About Pushpendra Tech
+
+ToolBox is made by **Pushpendra Singh** of [Pushpendra Tech](https://pushpendra.tech) — AI tools, apps, websites and daily tech updates:
+
+- Website: https://pushpendra.tech
+- 17 free online tools (PDF, image & AI — no sign-up, files never upload): https://pushpendra.tech/tools/
+- AI Image Prompts gallery (220+ copy-paste prompts): https://pushpendra.tech/ai-image-prompts/
+- YouTube: https://youtube.com/@pushpendra.tech4
+- Instagram: https://www.instagram.com/pushpendra.tech
+
 ## Open & build (Android Studio)
 1. Install Android Studio (Ladybug or newer) with SDK Platform 35 + Build-Tools 35.
 2. `File → Open` → select this folder. Let Gradle sync (first sync downloads AGP/Kotlin/Compose/Media3/PDFBox/ML Kit — needs internet).
